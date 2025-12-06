@@ -1,0 +1,69 @@
+name: Deploy to Kubernetes
+
+on:
+  workflow_call:
+    inputs:
+      image:
+        type: string
+        required: true
+      namespace:
+        type: string
+        required: true
+      deployment:
+        type: string
+        required: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG_CONTENT }}" > ~/.kube/config
+
+      - name: Deploy to Kubernetes
+        run: |
+          # Create namespace if it doesn't exist
+          kubectl create namespace ${{ inputs.namespace }} --dry-run=client -o yaml | kubectl apply -f -
+
+          # Create deployment manifest
+          cat <<EOF | kubectl apply -f -
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: ${{ inputs.deployment }}
+            namespace: ${{ inputs.namespace }}
+          spec:
+            replicas: 2
+            selector:
+              matchLabels:
+                app: ${{ inputs.deployment }}
+            template:
+              metadata:
+                labels:
+                  app: ${{ inputs.deployment }}
+              spec:
+                containers:
+                - name: ${{ inputs.deployment }}
+                  image: ${{ inputs.image }}
+                  ports:
+                  - containerPort: 8080
+          EOF
+
+          # Create service
+          cat <<EOF | kubectl apply -f -
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: ${{ inputs.deployment }}-service
+            namespace: ${{ inputs.namespace }}
+          spec:
+            selector:
+              app: ${{ inputs.deployment }}
+            ports:
+            - port: 80
+              targetPort: 8080
+            type: ClusterIP
+          EOF
