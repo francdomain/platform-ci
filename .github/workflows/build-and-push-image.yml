@@ -10,10 +10,14 @@ on:
         type: string
         default: "."
     secrets:
+      username:
+        required: true
+      password:
+        required: true
       # REGISTRY_USERNAME:
       #   required: true
       # REGISTRY_PASSWORD:
-      #   required: true
+        # required: true
       # GITHUB_TOKEN:
       #   required: true
 
