@@ -1,3 +1,48 @@
+# name: Deploy to Kubernetes (Reusable)
+
+# on:
+#   workflow_call:
+#     inputs:
+#       image:
+#         required: true
+#         type: string
+#       namespace:
+#         required: true
+#         type: string
+#       deployment:
+#         required: true
+#         type: string
+#     secrets:
+#       KUBECONFIG_CONTENT:
+#         required: true
+
+# jobs:
+#   deploy:
+#     runs-on: ubuntu-latest
+
+#     steps:
+#     - uses: actions/checkout@v4
+
+#     - name: Setup kubectl
+#       uses: azure/setup-kubectl@v3
+#       with:
+#         version: 'latest'
+
+#     - name: Configure Kubernetes
+#       run: |
+#         echo "${{ secrets.KUBECONFIG_CONTENT }}" > kubeconfig.yaml
+#         export KUBECONFIG=kubeconfig.yaml
+
+#         # Create namespace if not exists
+#         kubectl create namespace ${{ inputs.namespace }} --dry-run=client -o yaml | kubectl apply -f -
+
+#         # Update deployment image
+#         kubectl set image deployment/${{ inputs.deployment }} ${{ inputs.deployment }}=${{ inputs.image }} -n ${{ inputs.namespace }} || echo "Deployment might not exist yet"
+
+#         # Wait for rollout
+#         kubectl rollout status deployment/${{ inputs.deployment }} -n ${{ inputs.namespace }} --timeout=300s || echo "Rollout check failed"
+
+
 name: Deploy to Kubernetes (Reusable)
 
 on:
@@ -21,23 +66,49 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-    - name: Setup kubectl
-      uses: azure/setup-kubectl@v3
-      with:
-        version: 'latest'
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
 
-    - name: Configure Kubernetes
-      run: |
-        echo "${{ secrets.KUBECONFIG_CONTENT }}" > kubeconfig.yaml
-        export KUBECONFIG=kubeconfig.yaml
+      - name: Configure Kubernetes
+        run: |
+          set -euo pipefail
 
-        # Create namespace if not exists
-        kubectl create namespace ${{ inputs.namespace }} --dry-run=client -o yaml | kubectl apply -f -
+          # Load secret into variable (preserves newlines)
+          KCF="${{ secrets.KUBECONFIG_CONTENT }}"
 
-        # Update deployment image
-        kubectl set image deployment/${{ inputs.deployment }} ${{ inputs.deployment }}=${{ inputs.image }} -n ${{ inputs.namespace }} || echo "Deployment might not exist yet"
+          # If the secret is a single-line base64-ish string, try decoding it.
+          if [[ "$KCF" =~ ^[A-Za-z0-9+/=]+$ ]] && ! printf '%s' "$KCF" | grep -q $'\n'; then
+            echo "Detected possible base64 kubeconfig — attempting decode"
+            if echo "$KCF" | base64 --decode > kubeconfig.yaml 2>/dev/null; then
+              echo "Decoded base64 kubeconfig"
+            else
+              echo "Base64 decode failed; writing raw content instead"
+              printf '%s' "$KCF" > kubeconfig.yaml
+            fi
+          else
+            # Write raw content and preserve newlines
+            printf '%s' "$KCF" > kubeconfig.yaml
+          fi
 
-        # Wait for rollout
-        kubectl rollout status deployment/${{ inputs.deployment }} -n ${{ inputs.namespace }} --timeout=300s || echo "Rollout check failed"
+          chmod 600 kubeconfig.yaml
+          export KUBECONFIG=$PWD/kubeconfig.yaml
+
+          # Validate kubeconfig early
+          if ! kubectl --kubeconfig="$KUBECONFIG" config view >/dev/null 2>&1; then
+            echo "kubeconfig is invalid (kubectl config view failed)"
+            sed -n '1,40p' kubeconfig.yaml
+            exit 1
+          fi
+
+          # Create namespace if not exists
+          kubectl create namespace "${{ inputs.namespace }}" --dry-run=client -o yaml | kubectl apply -f -
+
+          # Update deployment image
+          kubectl set image deployment/${{ inputs.deployment }} ${{ inputs.deployment }}=${{ inputs.image }} -n ${{ inputs.namespace }} || echo "Deployment might not exist yet"
+
+          # Wait for rollout
+          kubectl rollout status deployment/${{ inputs.deployment }} -n ${{ inputs.namespace }} --timeout=300s || echo "Rollout check failed"
