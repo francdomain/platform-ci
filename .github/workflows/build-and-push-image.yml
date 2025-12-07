@@ -10,14 +10,14 @@ on:
         type: string
         default: "."
     secrets:
-      username:
-        required: true
-      password:
-        required: true
-      # REGISTRY_USERNAME:
+      # username:
       #   required: true
-      # REGISTRY_PASSWORD:
-        # required: true
+      # password:
+      #   required: true
+      REGISTRY_USERNAME:
+        required: true
+      REGISTRY_PASSWORD:
+        required: true
 
 jobs:
   build:
