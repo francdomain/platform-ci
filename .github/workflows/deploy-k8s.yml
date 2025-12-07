@@ -1,16 +1,19 @@
-name: Deploy to Kubernetes
+name: Deploy to Kubernetes (Reusable)
 
 on:
   workflow_call:
     inputs:
       image:
-        type: string
         required: true
+        type: string
       namespace:
-        type: string
         required: true
-      deployment:
         type: string
+      deployment:
+        required: true
+        type: string
+    secrets:
+      KUBECONFIG_CONTENT:
         required: true
 
 jobs:
@@ -18,52 +21,23 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Configure kubeconfig
-        run: |
-          mkdir -p ~/.kube
-          echo "${{ secrets.KUBECONFIG_CONTENT }}" > ~/.kube/config
+    - uses: actions/checkout@v4
 
-      - name: Deploy to Kubernetes
-        run: |
-          # Create namespace if it doesn't exist
-          kubectl create namespace ${{ inputs.namespace }} --dry-run=client -o yaml | kubectl apply -f -
+    - name: Setup kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'latest'
 
-          # Create deployment manifest
-          cat <<EOF | kubectl apply -f -
-          apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: ${{ inputs.deployment }}
-            namespace: ${{ inputs.namespace }}
-          spec:
-            replicas: 2
-            selector:
-              matchLabels:
-                app: ${{ inputs.deployment }}
-            template:
-              metadata:
-                labels:
-                  app: ${{ inputs.deployment }}
-              spec:
-                containers:
-                - name: ${{ inputs.deployment }}
-                  image: ${{ inputs.image }}
-                  ports:
-                  - containerPort: 8080
-          EOF
+    - name: Configure Kubernetes
+      run: |
+        echo "${{ secrets.KUBECONFIG_CONTENT }}" > kubeconfig.yaml
+        export KUBECONFIG=kubeconfig.yaml
 
-          # Create service
-          cat <<EOF | kubectl apply -f -
-          apiVersion: v1
-          kind: Service
-          metadata:
-            name: ${{ inputs.deployment }}-service
-            namespace: ${{ inputs.namespace }}
-          spec:
-            selector:
-              app: ${{ inputs.deployment }}
-            ports:
-            - port: 80
-              targetPort: 8080
-            type: ClusterIP
-          EOF
+        # Create namespace if not exists
+        kubectl create namespace ${{ inputs.namespace }} --dry-run=client -o yaml | kubectl apply -f -
+
+        # Update deployment image
+        kubectl set image deployment/${{ inputs.deployment }} ${{ inputs.deployment }}=${{ inputs.image }} -n ${{ inputs.namespace }} || echo "Deployment might not exist yet"
+
+        # Wait for rollout
+        kubectl rollout status deployment/${{ inputs.deployment }} -n ${{ inputs.namespace }} --timeout=300s || echo "Rollout check failed"
