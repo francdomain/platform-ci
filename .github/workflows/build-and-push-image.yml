@@ -14,8 +14,6 @@ on:
         required: true
       REGISTRY_PASSWORD:
         required: true
-      GITHUB_TOKEN:
-        required: true
 
 jobs:
   build:
@@ -33,7 +31,7 @@ jobs:
           registry: ghcr.io
           username: ${{ secrets.REGISTRY_USERNAME }}
           password: ${{ secrets.REGISTRY_PASSWORD }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
         uses: docker/build-push-action@v5
